@@ -1,0 +1,2 @@
+[functions.attendance-api]
+verify_jwt = false
