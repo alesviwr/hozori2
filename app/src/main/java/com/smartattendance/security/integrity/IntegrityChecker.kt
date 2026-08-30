@@ -46,7 +46,7 @@ class PlayIntegrityChecker(
         // هرگز onSuccess/onFailure را صدا نزند. بدون timeout، این‌جا برای همیشه معلق می‌ماند و کل
         // فرآیند ثبت حضور (که منتظر verdict است) گیر می‌کند. TIMEOUT_MS این را تضمین‌شده می‌کند.
         val token = withTimeoutOrNull(TIMEOUT_MS) {
-            suspendCancellableCoroutine { cont ->
+            suspendCancellableCoroutine<String> { cont ->
                 manager
                     .requestIntegrityToken(
                         IntegrityTokenRequest.builder().setNonce(nonce).build(),
