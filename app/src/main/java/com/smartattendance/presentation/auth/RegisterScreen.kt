@@ -1,5 +1,6 @@
 package com.smartattendance.presentation.auth
 
+import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -8,11 +9,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -20,17 +23,22 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.fragment.app.FragmentActivity
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -42,8 +50,11 @@ import com.smartattendance.core.util.persianMessage
 import com.smartattendance.domain.model.Role
 import com.smartattendance.domain.repository.LoginResult
 import com.smartattendance.domain.repository.mapThrowable
+import com.smartattendance.domain.usecase.EnrollBiometricUseCase
 import com.smartattendance.domain.usecase.LoginUseCase
 import com.smartattendance.domain.usecase.RegisterUseCase
+import com.smartattendance.security.biometric.BiometricAuthenticator
+import com.smartattendance.security.biometric.BiometricKeyManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -51,6 +62,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+
+enum class RegisterPhase { FORM, ENROLLING, DONE }
 
 data class RegisterUiState(
     val name: String = "",
@@ -60,12 +73,15 @@ data class RegisterUiState(
     val role: Role = Role.STUDENT,
     val loading: Boolean = false,
     val error: String? = null,
+    val phase: RegisterPhase = RegisterPhase.FORM,
 )
 
 @HiltViewModel
 class RegisterViewModel @Inject constructor(
     private val registerUseCase: RegisterUseCase,
     private val loginUseCase: LoginUseCase,
+    private val enrollBiometric: EnrollBiometricUseCase,
+    val authenticator: BiometricAuthenticator,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(RegisterUiState())
@@ -77,7 +93,7 @@ class RegisterViewModel @Inject constructor(
     fun onStudentNumberChange(v: String) = _state.update { it.copy(studentNumber = v, error = null) }
     fun onRoleChange(v: Role) = _state.update { it.copy(role = v, error = null) }
 
-    fun register(onSuccess: (Role) -> Unit) {
+    fun register() {
         val s = _state.value
         if (s.name.isBlank() || s.email.isBlank() || s.password.isBlank()) {
             _state.update { it.copy(error = "اطلاعات را کامل وارد کنید") }
@@ -94,13 +110,19 @@ class RegisterViewModel @Inject constructor(
                 val result: LoginResult = loginUseCase(s.email, s.password)
                 result
             }.onSuccess { result ->
-                _state.update { it.copy(loading = false) }
-                onSuccess(result.user.role)
+                _state.update { it.copy(loading = false, phase = RegisterPhase.ENROLLING, role = result.user.role) }
             }.onFailure { t ->
                 _state.update { it.copy(loading = false, error = mapThrowable(t).persianMessage()) }
             }
         }
     }
+
+    fun enrollBiometric(publicKey: String) = viewModelScope.launch {
+        runCatching { enrollBiometric(publicKey) }
+        _state.update { it.copy(phase = RegisterPhase.DONE) }
+    }
+
+    fun finishWithoutBiometric() = _state.update { it.copy(phase = RegisterPhase.DONE) }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -112,6 +134,24 @@ fun RegisterScreen(
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
 
+    if (state.phase == RegisterPhase.DONE) {
+        LaunchedEffect(Unit) { onRegistered(state.role) }
+    }
+
+    if (state.phase == RegisterPhase.ENROLLING) {
+        EnrollmentStep(vm = vm)
+    } else {
+        RegisterForm(state = state, vm = vm, onBack = onBack)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun RegisterForm(
+    state: RegisterUiState,
+    vm: RegisterViewModel,
+    onBack: () -> Unit,
+) {
     Scaffold(
         topBar = {
             TopAppBar(
@@ -199,13 +239,79 @@ fun RegisterScreen(
                     PrimaryButton(
                         text = Fa.REGISTER,
                         loading = state.loading,
-                        onClick = {
-                            vm.register { role ->
-                                onRegistered(role)
-                            }
-                        },
+                        onClick = vm::register,
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EnrollmentStep(vm: RegisterViewModel) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(Unit) {
+        val activity = context as? FragmentActivity
+        if (activity == null || !vm.authenticator.canAuthenticate(activity)) {
+            vm.finishWithoutBiometric()
+            return@LaunchedEffect
+        }
+        val keyManager = BiometricKeyManager()
+        if (!keyManager.hasKey() && !keyManager.generateKeyPair()) {
+            vm.finishWithoutBiometric()
+            return@LaunchedEffect
+        }
+        val signature = keyManager.newSigningSignature()
+        if (signature == null) {
+            vm.finishWithoutBiometric()
+            return@LaunchedEffect
+        }
+        vm.authenticator.authenticate(
+            activity = activity,
+            title = Fa.BIOMETRIC_TITLE,
+            subtitle = "برای ثبت اثر انگشت حساب خود، انگشت خود را اسکن کنید",
+            negativeText = "انصراف",
+            crypto = BiometricPrompt.CryptoObject(signature),
+            onSuccess = {
+                val publicKey = keyManager.publicKeyBase64()
+                if (publicKey == null) {
+                    vm.finishWithoutBiometric()
+                } else {
+                    scope.launch { vm.enrollBiometric(publicKey) }
+                }
+            },
+            onError = { vm.finishWithoutBiometric() },
+        )
+    }
+
+    Scaffold { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Icon(
+                Icons.Filled.Fingerprint,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(96.dp),
+            )
+            Spacer(Modifier.height(18.dp))
+            Text("ثبت بیومتریک حساب", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "انگشت خود را روی سنسور اسکن کنید تا کلید امنیت حساب شما ساخته شود",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            Spacer(Modifier.height(20.dp))
+            OutlinedButton(onClick = vm::finishWithoutBiometric) {
+                Text("فعلاً بدون اثر انگشت")
             }
         }
     }

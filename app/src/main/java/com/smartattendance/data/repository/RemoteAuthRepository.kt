@@ -6,6 +6,7 @@ import com.smartattendance.data.local.DeviceIdManager
 import com.smartattendance.data.local.StoredUser
 import com.smartattendance.data.local.TokenStorage
 import com.smartattendance.data.remote.api.AttendanceApi
+import com.smartattendance.data.remote.dto.BiometricEnrollDto
 import com.smartattendance.data.remote.dto.LoginRequestDto
 import com.smartattendance.data.remote.dto.RegisterRequestDto
 import com.smartattendance.data.remote.dto.RegisterDeviceDto
@@ -71,6 +72,17 @@ class RemoteAuthRepository @Inject constructor(
                 studentNumber = studentNumber?.trim()?.ifBlank { null },
                 deviceId = deviceIdManager.getOrCreate(),
                 deviceModel = "${Build.MANUFACTURER} ${Build.MODEL}",
+            ),
+        )
+    } catch (t: Throwable) {
+        throw AppException(mapThrowable(t))
+    }
+
+    override suspend fun enrollBiometric(publicKeyBase64: String) = try {
+        api.enrollBiometric(
+            BiometricEnrollDto(
+                deviceId = deviceIdManager.getOrCreate(),
+                publicKey = publicKeyBase64,
             ),
         )
     } catch (t: Throwable) {

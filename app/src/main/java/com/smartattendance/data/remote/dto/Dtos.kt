@@ -177,3 +177,10 @@ data class IntegrityRequestDto(val nonce: String, val integrityToken: String)
 
 @Serializable
 data class IntegrityResponseDto(val verdict: String) // PASSES | FAILS | UNKNOWN
+
+@Serializable
+data class BiometricEnrollDto(
+    val deviceId: String,
+    val publicKey: String,
+    val algorithm: String = "EC_P256",
+)

@@ -39,6 +39,10 @@ class RegisterUseCase @Inject constructor(private val auth: AuthRepository) {
     ) = auth.register(name, email, password, role, studentNumber)
 }
 
+class EnrollBiometricUseCase @Inject constructor(private val auth: AuthRepository) {
+    suspend operator fun invoke(publicKeyBase64: String) = auth.enrollBiometric(publicKeyBase64)
+}
+
 class GetCurrentUserUseCase @Inject constructor(private val auth: AuthRepository) {
     suspend operator fun invoke(): User? = auth.currentUser()
 }

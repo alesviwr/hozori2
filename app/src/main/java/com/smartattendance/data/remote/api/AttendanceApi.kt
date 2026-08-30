@@ -2,6 +2,7 @@ package com.smartattendance.data.remote.api
 
 import com.smartattendance.data.remote.dto.AttendanceOutcomeDto
 import com.smartattendance.data.remote.dto.AudioChallengeDto
+import com.smartattendance.data.remote.dto.BiometricEnrollDto
 import com.smartattendance.data.remote.dto.CourseDto
 import com.smartattendance.data.remote.dto.CreateCourseRequestDto
 import com.smartattendance.data.remote.dto.CreateSessionRequestDto
@@ -102,4 +103,7 @@ interface AttendanceApi {
     // ───────── Security ─────────
     @POST("security/integrity")
     suspend fun integrity(@Body body: IntegrityRequestDto): IntegrityResponseDto
+
+    @POST("security/biometric-enroll")
+    suspend fun enrollBiometric(@Body body: BiometricEnrollDto)
 }

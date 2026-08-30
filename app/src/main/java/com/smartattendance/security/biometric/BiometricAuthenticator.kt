@@ -23,6 +23,7 @@ class BiometricAuthenticator @Inject constructor() {
             BiometricManager.BIOMETRIC_SUCCESS
 
     /**
+     * @param crypto   برای کلیدهای نیازمند تأیید بیومتریک (CryptoObject با Signature)
      * @param onSuccess پس از موفقیت سنسور بیومتریک
      * @param onError   خطای غیرقابل بازیابی یا انصراف کاربر
      */
@@ -31,6 +32,7 @@ class BiometricAuthenticator @Inject constructor() {
         title: String,
         subtitle: String,
         negativeText: String,
+        crypto: BiometricPrompt.CryptoObject? = null,
         onSuccess: () -> Unit,
         onError: (message: String) -> Unit,
     ) {
@@ -56,6 +58,6 @@ class BiometricAuthenticator @Inject constructor() {
             .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_WEAK)
             .build()
 
-        prompt.authenticate(info)
+        if (crypto != null) prompt.authenticate(info, crypto) else prompt.authenticate(info)
     }
 }

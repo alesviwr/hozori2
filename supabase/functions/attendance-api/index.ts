@@ -560,6 +560,20 @@ app.post("/security/integrity", async (c) => {
   return c.json({ verdict: "PASSES" });
 });
 
+app.post("/security/biometric-enroll", async (c) => {
+  const user = await requireUser(c.req.raw);
+  const body = await c.req.json();
+  const publicKey = String(body.publicKey ?? "").trim();
+  const deviceId = String(body.deviceId ?? "").trim();
+  const algorithm = String(body.algorithm ?? "EC_P256");
+  if (!publicKey || !deviceId) throw new ApiError(400, "BIOMETRIC_FAILED");
+  await admin.from("biometric_keys").upsert(
+    { user_id: user.id, device_id: deviceId, public_key: publicKey, algorithm },
+    { onConflict: "user_id,device_id" },
+  );
+  return c.json({ ok: true });
+});
+
 app.get("/debug-auth", async (c) => {
   if (c.req.query("key") !== QR_HMAC_SECRET) return c.json({ error: "FORBIDDEN" }, 403);
   const { data, error } = await admin.auth.admin.listUsers({ page: 1, perPage: 50 });

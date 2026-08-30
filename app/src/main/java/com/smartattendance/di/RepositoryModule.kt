@@ -26,7 +26,9 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import okhttp3.Interceptor
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
 import org.json.JSONObject
 import javax.inject.Inject
 import javax.inject.Qualifier
@@ -87,7 +89,7 @@ class AuthInterceptor @Inject constructor(
     }
 }
 
-/** تبدیل بدنه خطای سرور {"error": "QR_EXPIRED"} به AppException با کد استاندارد */
+/** تبدیل بدنهٔ خطای سرور به ساختار استاندارد {"error": CODE} — بدون پرتاب استثنا (پرتاب از interceptor باعث کرش اپ می‌شود) */
 @Singleton
 class ErrorMappingInterceptor @Inject constructor() : Interceptor {
 
@@ -101,8 +103,9 @@ class ErrorMappingInterceptor @Inject constructor() : Interceptor {
         } catch (_: Exception) {
             "SERVER_ERROR"
         }
-        val type = runCatching { AppErrorType.valueOf(code) }.getOrDefault(AppErrorType.SERVER_ERROR)
-        throw AppException(type, "HTTP ${response.code}: $code")
+        val normalized = JSONObject().put("error", code).toString()
+            .toResponseBody("application/json".toMediaType())
+        return response.newBuilder().body(normalized).build()
     }
 }
 

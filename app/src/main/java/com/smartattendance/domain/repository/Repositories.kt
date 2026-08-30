@@ -1,6 +1,7 @@
 package com.smartattendance.domain.repository
 
 import com.smartattendance.core.util.AppErrorType
+import com.smartattendance.core.util.AppException
 import com.smartattendance.domain.model.AttendanceOutcome
 import com.smartattendance.domain.model.AttendanceSession
 import com.smartattendance.domain.model.AudioChallengeData
@@ -28,6 +29,9 @@ interface AuthRepository {
 
     /** ثبت‌نام کاربر جدید — پس از موفقیت، ورود خودکار انجام می‌شود */
     suspend fun register(name: String, email: String, password: String, role: Role, studentNumber: String?)
+
+    /** ثبت کلید عمومی محافظت‌شده با بیومتریک دستگاه (اثر انگشت) روی سرور */
+    suspend fun enrollBiometric(publicKeyBase64: String)
 
     /** کاربر جاری؛ اگر نشست نامعتبر باشد null برمی‌گرداند */
     suspend fun currentUser(): User?
@@ -97,6 +101,13 @@ interface StudentRepository {
 
 /** نگاشت خطای سرور/شبکه به AppErrorType — در هر دو پیاده‌سازی Mock و Remote استفاده می‌شود */
 fun mapThrowable(t: Throwable): AppErrorType = when (t) {
-    is com.smartattendance.core.util.AppException -> t.type
+    is AppException -> t.type
+    is retrofit2.HttpException -> {
+        val code = runCatching {
+            val raw = t.response()?.errorBody()?.string()
+            org.json.JSONObject(raw ?: "").optString("error").ifBlank { "SERVER_ERROR" }
+        }.getOrDefault("SERVER_ERROR")
+        runCatching { AppErrorType.valueOf(code) }.getOrDefault(AppErrorType.SERVER_ERROR)
+    }
     else -> AppErrorType.NETWORK_ERROR
 }

@@ -57,6 +57,10 @@ class MockAuthRepository @Inject constructor(
         )
     }
 
+    override suspend fun enrollBiometric(publicKeyBase64: String) {
+        tokenStorage.requireToken()
+    }
+
     override suspend fun currentUser(): User? {
         val stored = tokenStorage.currentUser() ?: return null
         val token = tokenStorage.accessToken() ?: return null
