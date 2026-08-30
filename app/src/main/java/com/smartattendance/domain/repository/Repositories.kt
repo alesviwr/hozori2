@@ -12,6 +12,7 @@ import com.smartattendance.domain.model.MonitorData
 import com.smartattendance.domain.model.QrTokenData
 import com.smartattendance.domain.model.ReportDetail
 import com.smartattendance.domain.model.ReportSummary
+import com.smartattendance.domain.model.Role
 import com.smartattendance.domain.model.StudentAttendanceItem
 import com.smartattendance.domain.model.StudentHomeData
 import com.smartattendance.domain.model.User
