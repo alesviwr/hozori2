@@ -15,7 +15,10 @@ const QR_HMAC_SECRET = Deno.env.get("QR_HMAC_SECRET")!; // با: openssl rand -h
 const admin: SupabaseClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 const authClient: SupabaseClient = createClient(SUPABASE_URL, ANON_KEY);
 
-const QR_TTL_MS = 3_000;
+// توجه: قبلاً ۳ ثانیه بود — این فاصله برای فوکوس دوربین + دیکود بارکد + رفت‌وبرگشت شبکه
+// (خصوصاً روی اتصال‌های کندتر/فیلترشده) کافی نبود و باعث می‌شد QR سالم هم تا رسیدن
+// درخواست verify-qr به سرور منقضی شده باشد. ۱۵ ثانیه هنوز چرخشی و امن است ولی زمان کافی می‌دهد.
+const QR_TTL_MS = 15_000;
 const AUDIO_TTL_MS = 12_000;
 const QR_PREFIX = "AT";
 

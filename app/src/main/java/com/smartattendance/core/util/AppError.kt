@@ -14,6 +14,7 @@ enum class AppErrorType {
     BIOMETRIC_UNAVAILABLE,
     AUDIO_TIMEOUT,
     AUDIO_INVALID,
+    MIC_UNAVAILABLE,
     CHALLENGE_EXPIRED,
     ALREADY_ATTENDED,
     BACKGROUND_DETECTED,
@@ -39,6 +40,7 @@ fun AppErrorType.persianMessage(): String = when (this) {
     AppErrorType.BIOMETRIC_UNAVAILABLE -> "احراز هویت بیومتریک روی این دستگاه در دسترس نیست."
     AppErrorType.AUDIO_TIMEOUT -> "زمان شنیدن Challenge به پایان رسید. دوباره تلاش کنید."
     AppErrorType.AUDIO_INVALID -> "توکن صوتی نامعتبر است."
+    AppErrorType.MIC_UNAVAILABLE -> "به میکروفون دسترسی نیست. مجوز میکروفون را برای برنامه فعال کنید یا مطمئن شوید برنامه‌ی دیگری از میکروفون استفاده نمی‌کند."
     AppErrorType.CHALLENGE_EXPIRED -> "این Challenge منقضی شده است؛ از استاد بخواهید مجدداً پخش شود."
     AppErrorType.ALREADY_ATTENDED -> "حضور شما قبلاً ثبت شده است."
     AppErrorType.BACKGROUND_DETECTED -> "خروج از صفحه باعث لغو Challenge شد. فرآیند را از نو شروع کنید."

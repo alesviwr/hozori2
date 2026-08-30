@@ -1,5 +1,9 @@
 package com.smartattendance.presentation.student.audio
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -11,7 +15,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Headphones
+import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -23,11 +29,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -101,9 +112,9 @@ class AudioVerificationViewModel @Inject constructor(
     private var listenJob: Job? = null
     private val decoder = AudioChallengeDecoder()
 
-    init {
-        start()
-    }
+    // توجه: قبلاً اینجا start() مستقیم صدا زده می‌شد، یعنی میکروفون قبل از اینکه Compose
+    // اصلاً فرصت درخواست مجوز RECORD_AUDIO را داشته باشد، تلاش می‌کرد ضبط کند و همیشه شکست
+    // می‌خورد. حالا start() فقط بعد از تأیید مجوز در UI صدا زده می‌شود.
 
     /** شروع / شروع مجدد شنیدن */
     fun start() {
@@ -131,7 +142,10 @@ class AudioVerificationViewModel @Inject constructor(
                         }
                 }.onFailure {
                     if (_phase.value is AudioPhase.Listening) {
-                        _phase.value = AudioPhase.Error(AppErrorType.NETWORK_ERROR)
+                        // این خطا از AudioRecord/میکروفون است، نه شبکه — قبلاً اشتباهاً NETWORK_ERROR
+                        // برچسب می‌خورد که کاربر را گمراه می‌کرد («اینترنتت رو چک کن» درحالی‌که
+                        // مشکل واقعی نبودِ مجوز میکروفون یا اشغال‌بودن آن بود).
+                        _phase.value = AudioPhase.Error(AppErrorType.MIC_UNAVAILABLE)
                     }
                 }
             }
@@ -223,6 +237,19 @@ class AudioVerificationViewModel @Inject constructor(
     }
 }
 
+@Composable
+private fun MicPermissionRationale(onRequest: () -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Icon(Icons.Filled.MicOff, contentDescription = null, modifier = Modifier.size(56.dp), tint = MaterialTheme.colorScheme.outline)
+        Text("برای شنیدن Challenge، دسترسی میکروفون لازم است", style = MaterialTheme.typography.bodyLarge)
+        Button(onClick = onRequest) { Text("اجازه دسترسی به میکروفون") }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AudioVerificationScreen(
@@ -236,6 +263,24 @@ fun AudioVerificationScreen(
     val phase by vm.phase.collectAsStateWithLifecycle()
     val lifecycleOwner: LifecycleOwner = LocalLifecycleOwner.current
     val view = LocalView.current
+    val context = LocalContext.current
+
+    // ───────── مجوز میکروفون — قبلاً اصلاً درخواست نمی‌شد ─────────
+    var hasMicPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED,
+        )
+    }
+    val micPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+        hasMicPermission = it
+    }
+    LaunchedEffect(Unit) {
+        if (!hasMicPermission) micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+    }
+    // به‌محض گرفتن مجوز، شنیدن را شروع کن (فقط یک‌بار)
+    LaunchedEffect(hasMicPermission) {
+        if (hasMicPermission) vm.start()
+    }
 
     // ناوبری موفقیت
     LaunchedEffect(phase) {
@@ -298,8 +343,10 @@ fun AudioVerificationScreen(
             verticalArrangement = Arrangement.Center,
         ) {
             val p = phase
-            when (p) {
-                is AudioPhase.Listening -> {
+            when {
+                !hasMicPermission -> MicPermissionRationale { micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) }
+
+                p is AudioPhase.Listening -> {
                     Icon(
                         Icons.Filled.Headphones,
                         contentDescription = null,
@@ -330,13 +377,13 @@ fun AudioVerificationScreen(
                     )
                 }
 
-                is AudioPhase.Verifying -> {
+                p is AudioPhase.Verifying -> {
                     CircularProgressIndicator(modifier = Modifier.size(56.dp), strokeWidth = 5.dp)
                     Spacer(Modifier.height(18.dp))
                     Text(Fa.LOADING, style = MaterialTheme.typography.titleMedium)
                 }
 
-                is AudioPhase.Success -> {
+                p is AudioPhase.Success -> {
                     Icon(
                         Icons.Filled.Headphones,
                         contentDescription = null,
@@ -347,7 +394,7 @@ fun AudioVerificationScreen(
                     Text(Fa.SUCCESS_TITLE, style = MaterialTheme.typography.headlineSmall)
                 }
 
-                is AudioPhase.Error -> {
+                p is AudioPhase.Error -> {
                     Icon(
                         Icons.Filled.Warning,
                         contentDescription = null,
