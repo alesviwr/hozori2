@@ -12,7 +12,7 @@ import kotlin.system.exitProcess
 
 /**
  * صفحهٔ نمایش متن کامل کرش برای دیباگ میدانی.
- * غیر از Hilt استفاده می‌کند تا در وضعیت خرابی process هم امن بالا بیاید.
+ * عمداً بدون Hilt/Compose است تا در وضعیت خرابی process هم امن بالا بیاید.
  */
 class CrashReportActivity : Activity() {
 
@@ -26,39 +26,40 @@ class CrashReportActivity : Activity() {
             setPadding(32, 32, 32, 32)
         }
 
-        val title = TextView(this).apply {
+        val titleView = TextView(this).apply {
             text = "خطای برنامه — متن زیر را کپی و ارسال کن"
             textSize = 16f
             setPadding(0, 0, 0, 24)
         }
 
-        val text = TextView(this).apply {
+        val traceView = TextView(this).apply {
             text = trace
             textSize = 11f
             setTextIsSelectable(true)
         }
 
-        val copy = Button(this).apply {
-            text = "کپی متن خطا"
-            setOnClickListener {
-                val cm = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
-                cm.setPrimaryClip(ClipData.newPlainText("crash", trace))
-                this@apply.text = "کپی شد ✔"
-            }
+        val copyButton = Button(this)
+        copyButton.text = "کپی متن خطا"
+        copyButton.setOnClickListener {
+            val cm = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+            cm.setPrimaryClip(ClipData.newPlainText("crash", trace))
+            copyButton.text = "کپی شد ✔"
         }
 
-        val close = Button(this).apply {
-            text = "بستن برنامه"
-            setOnClickListener { finishAffinity(); exitProcess(0) }
+        val closeButton = Button(this)
+        closeButton.text = "بستن برنامه"
+        closeButton.setOnClickListener {
+            finishAffinity()
+            exitProcess(0)
         }
 
-        root.addView(title)
+        root.addView(titleView)
         root.addView(
-            ScrollView(this).apply { addView(text) },
+            ScrollView(this).apply { addView(traceView) },
             LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f),
         )
-        root.addView(copy)
-        root.addView(close)
+        root.addView(copyButton)
+        root.addView(closeButton)
 
         setContentView(root)
     }
