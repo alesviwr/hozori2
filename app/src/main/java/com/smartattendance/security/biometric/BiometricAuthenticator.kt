@@ -17,15 +17,23 @@ import javax.inject.Inject
  */
 class BiometricAuthenticator @Inject constructor() {
 
-    fun canAuthenticate(context: Context): Boolean =
+    /**
+     * توجه: وقتی قرار است از CryptoObject استفاده شود، سطح لازم BIOMETRIC_STRONG است —
+     * اندروید احراز هویت مبتنی بر Crypto را با BIOMETRIC_WEAK اصلاً نمی‌پذیرد (IllegalArgumentException).
+     * پس این متد باید دقیقاً با همان سطحی چک شود که در authenticate() استفاده می‌شود، وگرنه
+     * canAuthenticate() می‌گوید «قابل استفاده است» ولی authenticate() بلافاصله کرش می‌کند.
+     */
+    fun canAuthenticate(context: Context, requireStrong: Boolean = false): Boolean =
         BiometricManager.from(context)
-            .canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_WEAK) ==
-            BiometricManager.BIOMETRIC_SUCCESS
+            .canAuthenticate(
+                if (requireStrong) BiometricManager.Authenticators.BIOMETRIC_STRONG
+                else BiometricManager.Authenticators.BIOMETRIC_WEAK,
+            ) == BiometricManager.BIOMETRIC_SUCCESS
 
     /**
-     * @param crypto   برای کلیدهای نیازمند تأیید بیومتریک (CryptoObject با Signature)
+     * @param crypto   برای کلیدهای نیازمند تأیید بیومتریک (CryptoObject با Signature) — نیازمند BIOMETRIC_STRONG
      * @param onSuccess پس از موفقیت سنسور بیومتریک
-     * @param onError   خطای غیرقابل بازیابی یا انصراف کاربر
+     * @param onError   خطای غیرقابل بازیابی یا انصراف کاربر — این callback تضمین می‌کند که این متد هرگز باعث کرش برنامه نشود
      */
     fun authenticate(
         activity: FragmentActivity,
@@ -36,28 +44,41 @@ class BiometricAuthenticator @Inject constructor() {
         onSuccess: () -> Unit,
         onError: (message: String) -> Unit,
     ) {
-        val executor = ContextCompat.getMainExecutor(activity)
-        val prompt = BiometricPrompt(
-            activity,
-            executor,
-            object : BiometricPrompt.AuthenticationCallback() {
-                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                    onSuccess()
-                }
+        try {
+            val executor = ContextCompat.getMainExecutor(activity)
+            val prompt = BiometricPrompt(
+                activity,
+                executor,
+                object : BiometricPrompt.AuthenticationCallback() {
+                    override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                        onSuccess()
+                    }
 
-                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                    onError(errString.toString())
-                }
-            },
-        )
+                    override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                        onError(errString.toString())
+                    }
+                },
+            )
 
-        val info = BiometricPrompt.PromptInfo.Builder()
-            .setTitle(title)
-            .setSubtitle(subtitle)
-            .setNegativeButtonText(negativeText)
-            .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_WEAK)
-            .build()
+            // کلید حیاتی: اگر crypto پاس داده شده، حتماً BIOMETRIC_STRONG لازم است.
+            val allowed = if (crypto != null) {
+                BiometricManager.Authenticators.BIOMETRIC_STRONG
+            } else {
+                BiometricManager.Authenticators.BIOMETRIC_WEAK
+            }
 
-        if (crypto != null) prompt.authenticate(info, crypto) else prompt.authenticate(info)
+            val info = BiometricPrompt.PromptInfo.Builder()
+                .setTitle(title)
+                .setSubtitle(subtitle)
+                .setNegativeButtonText(negativeText)
+                .setAllowedAuthenticators(allowed)
+                .build()
+
+            if (crypto != null) prompt.authenticate(info, crypto) else prompt.authenticate(info)
+        } catch (t: Throwable) {
+            // هر خطای غیرمنتظره (مثلاً عدم پشتیبانی سخت‌افزار از BIOMETRIC_STRONG، تنظیمات نامعتبر و...)
+            // دیگر کرش نمی‌کند؛ به‌صورت خطای معمولی به UI گزارش می‌شود.
+            onError(t.message ?: "خطای احراز هویت بیومتریک")
+        }
     }
 }

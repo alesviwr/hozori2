@@ -254,7 +254,9 @@ private fun EnrollmentStep(vm: RegisterViewModel) {
 
     LaunchedEffect(Unit) {
         val activity = context as? FragmentActivity
-        if (activity == null || !vm.authenticator.canAuthenticate(activity)) {
+        // این مسیر با CryptoObject کار می‌کند، پس باید سطح BIOMETRIC_STRONG را چک کنیم؛
+        // وگرنه ممکن است اینجا true برگردد ولی authenticate() بعداً شکست بخورد.
+        if (activity == null || !vm.authenticator.canAuthenticate(activity, requireStrong = true)) {
             vm.finishWithoutBiometric()
             return@LaunchedEffect
         }

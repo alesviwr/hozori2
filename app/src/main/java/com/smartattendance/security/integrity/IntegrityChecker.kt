@@ -7,6 +7,7 @@ import com.smartattendance.data.remote.api.AttendanceApi
 import com.smartattendance.data.remote.dto.IntegrityRequestDto
 import com.smartattendance.domain.model.IntegrityVerdict
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -41,17 +42,28 @@ class PlayIntegrityChecker(
 
     override suspend fun verdict(nonce: String): IntegrityVerdict = try {
         val manager = IntegrityManagerFactory.create(context)
-        val token = suspendCancellableCoroutine { cont ->
-            manager
-                .requestIntegrityToken(
-                    IntegrityTokenRequest.builder().setNonce(nonce).build(),
-                )
-                .addOnSuccessListener { cont.resume(it.token()) }
-                .addOnFailureListener { cont.resumeWithException(it) }
-        }
+        // اگر سرورهای گوگل در دسترس نباشند (مثلاً به‌خاطر محدودیت شبکه)، Play Services ممکن است
+        // هرگز onSuccess/onFailure را صدا نزند. بدون timeout، این‌جا برای همیشه معلق می‌ماند و کل
+        // فرآیند ثبت حضور (که منتظر verdict است) گیر می‌کند. TIMEOUT_MS این را تضمین‌شده می‌کند.
+        val token = withTimeoutOrNull(TIMEOUT_MS) {
+            suspendCancellableCoroutine { cont ->
+                manager
+                    .requestIntegrityToken(
+                        IntegrityTokenRequest.builder().setNonce(nonce).build(),
+                    )
+                    .addOnSuccessListener { cont.resume(it.token()) }
+                    .addOnFailureListener { cont.resumeWithException(it) }
+            }
+        } ?: return IntegrityVerdict.UNKNOWN
+
         val response = api.integrity(IntegrityRequestDto(nonce = nonce, integrityToken = token))
         runCatching { IntegrityVerdict.valueOf(response.verdict) }.getOrDefault(IntegrityVerdict.UNKNOWN)
     } catch (_: Exception) {
         IntegrityVerdict.UNKNOWN
+    }
+
+    private companion object {
+        /** حداکثر زمان انتظار برای پاسخ Play Integrity قبل از عبور با نتیجه UNKNOWN */
+        const val TIMEOUT_MS = 7_000L
     }
 }
