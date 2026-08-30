@@ -80,7 +80,7 @@ data class RegisterUiState(
 class RegisterViewModel @Inject constructor(
     private val registerUseCase: RegisterUseCase,
     private val loginUseCase: LoginUseCase,
-    private val enrollBiometric: EnrollBiometricUseCase,
+    private val enrollBiometricUseCase: EnrollBiometricUseCase,
     val authenticator: BiometricAuthenticator,
 ) : ViewModel() {
 
@@ -118,7 +118,7 @@ class RegisterViewModel @Inject constructor(
     }
 
     fun enrollBiometric(publicKey: String) = viewModelScope.launch {
-        runCatching { enrollBiometric(publicKey) }
+        runCatching { enrollBiometricUseCase(publicKey) }
         _state.update { it.copy(phase = RegisterPhase.DONE) }
     }
 
