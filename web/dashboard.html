@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>حضور و غیاب هوشمند — داشبورد استاد</title>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+<style>
+  :root{
+    --bg:#f4f6fb; --card:#ffffff; --ink:#1c2333; --muted:#68718a;
+    --primary:#3b5bfd; --primary-ink:#ffffff; --ok:#1a9e5c; --warn:#c78a04; --bad:#d23b4e;
+    --border:#e3e7f2; --radius:14px;
+  }
+  *{box-sizing:border-box; font-family:Vazirmatn,Segoe UI,Tahoma,sans-serif}
+  body{margin:0; background:var(--bg); color:var(--ink)}
+  header{background:var(--card); border-bottom:1px solid var(--border); padding:14px 22px; display:flex; align-items:center; gap:14px; position:sticky; top:0; z-index:5}
+  header h1{font-size:17px; margin:0}
+  header .spacer{flex:1}
+  button{cursor:pointer; border:none; border-radius:10px; padding:10px 18px; font-size:14px}
+  .btn-p{background:var(--primary); color:var(--primary-ink)}
+  .btn-g{background:#eef1fb; color:var(--primary)}
+  .btn-d{background:#fdecef; color:var(--bad)}
+  .btn-t{background:transparent; color:var(--muted); padding:8px 10px}
+  input,select{border:1px solid var(--border); border-radius:10px; padding:10px 12px; font-size:14px; background:#fff; width:100%}
+  label{font-size:13px; color:var(--muted); display:block; margin-bottom:5px}
+  .wrap{max-width:1080px; margin:22px auto; padding:0 18px}
+  .grid{display:grid; gap:14px}
+  .g4{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
+  .card{background:var(--card); border:1px solid var(--border); border-radius:var(--radius); padding:18px}
+  .stat b{font-size:26px; display:block; margin-top:4px}
+  .stat span{font-size:13px; color:var(--muted)}
+  nav{display:flex; gap:6px; flex-wrap:wrap; margin-bottom:18px}
+  nav button{background:var(--card); border:1px solid var(--border); color:var(--ink)}
+  nav button.active{background:var(--primary); color:#fff; border-color:var(--primary)}
+  table{width:100%; border-collapse:collapse; font-size:14px}
+  th,td{padding:10px 8px; border-bottom:1px solid var(--border); text-align:right}
+  th{color:var(--muted); font-weight:500; font-size:12px}
+  .chip{display:inline-block; padding:3px 12px; border-radius:99px; font-size:12px}
+  .c-ok{background:#e2f6eb; color:var(--ok)} .c-warn{background:#fdf3dc; color:var(--warn)} .c-bad{background:#fdecef; color:var(--bad)}
+  .qr-box{display:flex; flex-direction:column; align-items:center; gap:10px; padding:18px; background:#fff; border-radius:var(--radius); border:1px solid var(--border)}
+  .qr-box svg{width:min(320px,80vw); height:auto}
+  .token{font-family:monospace; letter-spacing:3px; font-size:18px; direction:ltr}
+  .row{display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end}
+  .row > div{flex:1; min-width:150px}
+  .muted{color:var(--muted); font-size:13px}
+  .err{background:#fdecef; color:var(--bad); border-radius:10px; padding:10px 14px; margin:10px 0; font-size:13px}
+  .okb{background:#e2f6eb; color:var(--ok); border-radius:10px; padding:10px 14px; margin:10px 0; font-size:13px}
+  .login{max-width:380px; margin:9vh auto; padding:26px}
+  .big{font-size:22px; font-weight:700}
+  .chipbtn{display:inline-block; padding:8px 16px; border-radius:99px; border:1px solid var(--border); background:#fff; margin-left:6px; cursor:pointer}
+  .chipbtn.active{background:var(--primary); color:#fff; border-color:var(--primary)}
+  .center{text-align:center}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+"use strict";
+const BASE = "https://xmbwsjhvbetcdbdfuspj.supabase.co/functions/v1/attendance-api";
+const $app = document.getElementById("app");
+const FA = "۰۱۲۳۴۵۶۷۸۹";
+const fa = s => String(s).replace(/[0-9]/g, d => FA[d]);
+
+const ERR_FA = {
+  QR_EXPIRED:"کد QR منقضی شده است", QR_INVALID:"کد QR نامعتبر است", QR_REQUIRED:"ابتدا QR اسکن شود",
+  SESSION_EXPIRED:"زمان جلسه به پایان رسیده", SESSION_CLOSED:"جلسه پایان یافته",
+  BIOMETRIC_FAILED:"تأیید بیومتریک ناموفق", AUDIO_TIMEOUT:"زمان شنیدن به پایان رسید", AUDIO_INVALID:"توکن صوتی نامعتبر",
+  CHALLENGE_EXPIRED:"چالش صوتی منقضی شد", ALREADY_ATTENDED:"حضور قبلاً ثبت شده", BACKGROUND_DETECTED:"خروج از صفحه لغو شد",
+  NETWORK_ERROR:"خطای شبکه؛ اینترنت را بررسی کنید", SERVER_ERROR:"خطای سرور", INVALID_CREDENTIALS:"ایمیل یا رمز عبور نادرست است",
+  EMAIL_TAKEN:"این ایمیل قبلاً ثبت شده", DEVICE_MISMATCH:"دستگاه دیگری متصل است", UNAUTHORIZED:"نشست معتبر نیست؛ دوباره وارد شوید",
+};
+
+let session = JSON.parse(localStorage.getItem("sa_session") || "null");
+let liveTimer = [], audioCtx = null, audioSource = null, currentChallenge = null, playing = false;
+let pollBusy = { qr: false, mon: false, au: false }, lastMonSig = "", lastQrToken = "";
+
+function saveSession(s){ session = s; localStorage.setItem("sa_session", JSON.stringify(s)); }
+function logout(){ liveStop(); localStorage.removeItem("sa_session"); session = null; render(); }
+function esc(s){ return String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+
+async function api(path, opts = {}) {
+  const headers = Object.assign({"Content-Type":"application/json"}, opts.headers || {});
+  if (session && session.token) headers["Authorization"] = "Bearer " + session.token;
+  let res = await fetch(BASE + path, Object.assign({}, opts, { headers }));
+  if (res.status === 401 && session && session.refreshToken) {
+    const r = await fetch(BASE + "/auth/refresh", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ refreshToken: session.refreshToken }),
+    });
+    if (r.ok) {
+      const d = await r.json();
+      saveSession(Object.assign({}, session, { token: d.token, refreshToken: d.refreshToken || session.refreshToken }));
+      headers["Authorization"] = "Bearer " + d.token;
+      res = await fetch(BASE + path, Object.assign({}, opts, { headers }));
+    } else { logout(); throw new Error(ERR_FA.UNAUTHORIZED); }
+  }
+  if (!res.ok) {
+    let code = "SERVER_ERROR";
+    try { const b = await res.clone().json(); code = b.error || b.code || "SERVER_ERROR"; } catch (_) {}
+    const e = new Error(ERR_FA[code] || ("خطا: " + code)); e.code = code; throw e;
+  }
+  if (res.status === 204) return null;
+  return res.json();
+}
+
+// ───────────── Audio Challenge (FSK ۱۶-تنه — پورت AudioChallengeCodec.kt) ─────────────
+const SR = 44100, AMP = 12000 / 32768;
+function writeTone(buf, pos, len, freq) {
+  const fade = Math.round(5 * SR / 1000), w = 2 * Math.PI * freq / SR;
+  for (let i = 0; i < len; i++) {
+    let g = 1;
+    if (i < fade) g = 0.5 - 0.5 * Math.cos(Math.PI * i / fade);
+    if (i >= len - fade) g = 0.5 - 0.5 * Math.cos(Math.PI * (len - i) / fade);
+    buf[pos + i] = AMP * g * Math.sin(w * i);
+  }
+  return pos + len;
+}
+function encodeChallenge(token) {
+  const n = ms => Math.round(ms * SR / 1000);
+  const pre = n(150), frame = n(90), end = n(120);
+  const buf = new Float32Array(pre + frame * 8 + end);
+  let pos = writeTone(buf, 0, pre, 750);
+  for (const ch of token) pos = writeTone(buf, pos, frame, 1000 + parseInt(ch, 16) * 190);
+  writeTone(buf, pos, end, 4300);
+  return buf;
+}
+function playChallenge(token) {
+  stopChallenge();
+  audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+  const raw = encodeChallenge(token);
+  const buffer = audioCtx.createBuffer(1, raw.length, SR);
+  buffer.copyToChannel(raw, 0);
+  audioSource = audioCtx.createBufferSource();
+  audioSource.buffer = buffer;
+  audioSource.loop = true;
+  const gain = audioCtx.createGain(); gain.gain.value = 0.9;
+  audioSource.connect(gain); gain.connect(audioCtx.destination);
+  audioSource.start();
+  playing = true;
+}
+function stopChallenge() {
+  if (audioSource) { try { audioSource.stop(); } catch (_) {} audioSource = null; }
+  playing = false;
+}
+
+// ───────────── Views ─────────────
+function render() {
+  if (!session || !session.token) return renderLogin();
+  if (session.user && session.user.role !== "PROFESSOR") {
+    $app.innerHTML = `<div class="card login center">این داشبورد مخصوص استاد است.<br><br><button class="btn-p" onclick="logout()">خروج</button></div>`;
+    return;
+  }
+  renderApp("dashboard");
+}
+
+function renderLogin(msg) {
+  liveStop();
+  $app.innerHTML = `
+  <div class="card login">
+    <h2 class="center">حضور و غیاب هوشمند</h2>
+    <p class="muted center">ورود استاد به داشبورد مدیریت</p>
+    <label>ایمیل</label><input id="l-email" type="email" placeholder="prof@uni.edu">
+    <div style="height:10px"></div>
+    <label>رمز عبور</label><input id="l-pass" type="password" placeholder="••••••••">
+    <div style="height:16px"></div>
+    <button class="btn-p" style="width:100%" onclick="doLogin()">ورود</button>
+    <div id="l-msg"></div>
+  </div>`;
+  if (msg) document.getElementById("l-msg").innerHTML = `<div class="err">${esc(msg)}</div>`;
+  const enter = e => { if (e.key === "Enter") doLogin(); };
+  document.getElementById("l-email").onkeydown = enter;
+  document.getElementById("l-pass").onkeydown = enter;
+  document.getElementById("l-email").focus();
+}
+
+async function doLogin() {
+  const email = document.getElementById("l-email").value.trim();
+  const pass = document.getElementById("l-pass").value;
+  document.getElementById("l-msg").innerHTML = "";
+  try {
+    const d = await api("/auth/login", { method:"POST", body: JSON.stringify({ email, password: pass }) });
+    if (d.user.role !== "PROFESSOR") throw new Error("این داشبورد مخصوص استاد است");
+    saveSession({ token: d.token, refreshToken: d.refreshToken, user: d.user });
+    render();
+  } catch (e) {
+    document.getElementById("l-msg").innerHTML = `<div class="err">${esc(e.message)}</div>`;
+  }
+}
+
+function renderApp(tab) {
+  liveStop();
+  $app.innerHTML = `
+  <header>
+    <h1>حضور و غیاب هوشمند</h1>
+    <span class="muted">${esc(session.user?.name || "")}</span>
+    <div class="spacer"></div>
+    <button class="btn-t" onclick="logout()">خروج</button>
+  </header>
+  <div class="wrap">
+    <nav>
+      <button data-t="dashboard" class="${tab === "dashboard" ? "active" : ""}" onclick="renderApp('dashboard')">داشبورد</button>
+      <button data-t="sessions" class="${tab === "sessions" ? "active" : ""}" onclick="renderApp('sessions')">جلسات و حضور‌و‌غیاب</button>
+      <button data-t="courses" class="${tab === "courses" ? "active" : ""}" onclick="renderApp('courses')">درس‌ها</button>
+      <button data-t="users" class="${tab === "users" ? "active" : ""}" onclick="renderApp('users')">ایجاد کاربر</button>
+      <button data-t="reports" class="${tab === "reports" ? "active" : ""}" onclick="renderApp('reports')">گزارش‌ها</button>
+    </nav>
+    <div id="view"><p class="muted">در حال بارگذاری...</p></div>
+  </div>`;
+  ({ dashboard: viewDashboard, sessions: viewSessions, courses: viewCourses, users: viewUsers, reports: viewReports }[tab]());
+}
+
+async function viewDashboard() {
+  const v = document.getElementById("view");
+  try {
+    const d = await api("/professor/dashboard");
+    v.innerHTML = `
+    <div class="grid g4">
+      <div class="card stat"><span>جلسه فعال</span><b>${d.activeSession ? esc(d.activeSession.courseName) : "—"}</b>
+        ${d.activeSession ? `<button class="btn-p" style="margin-top:10px" onclick="goLive()">ادامه جلسه</button>` : ""}</div>
+      <div class="card stat"><span>حاضرین</span><b class="c-ok chip">${fa(d.presentCount)}</b></div>
+      <div class="card stat"><span>در انتظار</span><b class="c-warn chip">${fa(d.pendingCount)}</b></div>
+      <div class="card stat"><span>درس‌های امروز</span><b>${fa(d.todayCourses.length)}</b></div>
+    </div>
+    <h3 style="margin:20px 0 10px">کلاس‌های امروز</h3>
+    <div class="card"><table><tr><th>درس</th><th>محل</th></tr>
+      ${(d.todayCourses || []).map(c => `<tr><td>${esc(c.courseName)}</td><td>${esc(c.room)}</td></tr>`).join("") || "<tr><td class='muted'>—</td></tr>"}
+    </table></div>
+    <h3 style="margin:20px 0 10px">جلسات اخیر</h3>
+    <div class="card"><table><tr><th>درس</th><th>تاریخ</th><th>حاضر</th><th>غایب</th></tr>
+      ${(d.recentSessions || []).map(r => `<tr><td>${esc(r.courseName)}</td><td>${esc(r.date)}</td><td>${fa(r.presentCount)}</td><td>${fa(r.absentCount)}</td></tr>`).join("") || "<tr><td colspan='4' class='muted'>گزارشی نیست</td></tr>"}
+    </table></div>`;
+  } catch (e) { v.innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+}
+
+async function viewSessions() {
+  const v = document.getElementById("view");
+  try {
+    const d = await api("/professor/dashboard");
+    const courses = await api("/professor/courses");
+    v.innerHTML = `
+    <div class="card">
+      <h3 style="margin-top:0">ایجاد جلسه حضور و غیاب</h3>
+      <div class="row">
+        <div><label>درس</label><select id="s-course">${courses.map(c => `<option value="${c.id}" data-b="${esc(c.building)}" data-r="${esc(c.room)}">${esc(c.name)}</option>`).join("")}</select></div>
+        <div><label>ساختمان</label><input id="s-b" value="${esc(courses[0]?.building || "")}"></div>
+        <div><label>کلاس</label><input id="s-r" value="${esc(courses[0]?.room || "")}"></div>
+      </div>
+      <div style="margin:14px 0 4px"><label>بازه حضورگیری</label>
+        <span class="chipbtn active" data-m="5">۵ دقیقه</span><span class="chipbtn" data-m="10">۱۰ دقیقه</span><span class="chipbtn" data-m="15">۱۵ دقیقه</span>
+      </div>
+      <div id="s-msg"></div>
+      <button class="btn-p" onclick="startSession()">شروع جلسه</button>
+    </div>
+    ${d.activeSession ? `<div class="okb">جلسه فعال دارید: <b>${esc(d.activeSession.courseName)}</b> <button class="btn-g" onclick="goLive()">ورود به صفحهٔ جلسه</button></div>` : ""}`;
+    document.getElementById("s-course").onchange = e => {
+      const o = e.target.selectedOptions[0];
+      document.getElementById("s-b").value = o.dataset.b || "";
+      document.getElementById("s-r").value = o.dataset.r || "";
+    };
+    document.querySelectorAll(".chipbtn").forEach(ch => ch.onclick = () => {
+      document.querySelectorAll(".chipbtn").forEach(x => x.classList.remove("active"));
+      ch.classList.add("active");
+    });
+  } catch (e) { v.innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+}
+
+async function startSession() {
+  const msg = document.getElementById("s-msg");
+  const minutes = Number(document.querySelector(".chipbtn.active").dataset.m);
+  try {
+    const s = await api("/professor/sessions", { method:"POST", body: JSON.stringify({
+      courseId: document.getElementById("s-course").value,
+      building: document.getElementById("s-b").value,
+      room: document.getElementById("s-r").value,
+      windowMinutes: minutes,
+    })});
+    goLive();
+  } catch (e) { msg.innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+}
+
+function goLive() { renderApp("dashboard"); setTimeout(viewLive, 50); }
+
+async function viewLive() {
+  document.querySelectorAll("nav button").forEach(b => b.classList.remove("active"));
+  const v = document.getElementById("view");
+  try {
+    const s = await api("/professor/sessions/active");
+    if (!s) { v.innerHTML = `<div class="card center"><p>جلسهٔ فعالی وجود ندارد.</p><button class="btn-g" onclick="renderApp('sessions')">ایجاد جلسه</button></div>`; return; }
+    v.innerHTML = `
+    <div class="grid" style="grid-template-columns:1fr 1fr">
+      <div class="qr-box">
+        <div class="muted">کد QR جلسه — هر ۳ ثانیه تغییر می‌کند</div>
+        <div id="qr">...</div>
+        <div class="token" id="qr-token"></div>
+        <div class="muted">زمان باقی‌مانده: <b id="live-count"></b></div>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">${esc(s.courseName)}</h3>
+        <p class="muted">${esc(s.building)} — کلاس ${fa(s.room)}</p>
+        <div class="muted">Audio Challenge (توکن صوتی)</div>
+        <div class="token" id="au-token" style="font-size:14px"></div>
+        <div style="margin:12px 0">
+          <button class="btn-p" id="au-btn" onclick="togglePlay()">▶ پخش صدا (برای گوشی دانشجوها)</button>
+        </div>
+        <p class="muted">صدا را با بلندگو پخش کنید؛ گوشی دانشجوها توکن را می‌شنوند.</p>
+        <button class="btn-d" onclick="closeLive()">پایان جلسه</button>
+      </div>
+    </div>
+    <h3 style="margin:18px 0 10px">وضعیت دانشجویان</h3>
+    <div class="card"><div id="mon">...</div></div>`;
+    liveStop();
+    liveTimer.push(setInterval(pollQr, 2500));
+    liveTimer.push(setInterval(pollAudio, 5000));
+    liveTimer.push(setInterval(pollMonitor, 3000));
+    liveTimer.push(setInterval(tickCountdown, 1000));
+    pollQr(); pollAudio(); pollMonitor();
+    window.__liveSession = s;
+  } catch (e) { v.innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+}
+
+async function pollQr() {
+  const s = window.__liveSession; if (!s || pollBusy.qr) return;
+  pollBusy.qr = true;
+  try {
+    const t = await api(`/professor/sessions/${s.id}/qr-token`);
+    if (t.fullToken === lastQrToken) return;
+    lastQrToken = t.fullToken;
+    const box = document.getElementById("qr"); if (!box) return;
+    document.getElementById("qr-token").textContent = t.fullToken.slice(0, 40) + "…";
+    if (window.qrcode) {
+      const q = window.qrcode(0, "M");
+      q.addData(t.fullToken); q.make();
+      box.innerHTML = q.createSvgTag({ cellSize: 5, margin: 2 });
+    } else {
+      box.innerHTML = `<div class="token" style="font-size:12px; word-break:break-all">${esc(t.fullToken)}</div><div class="muted">(کتابخانهٔ QR بارگذاری نشد — اینترنت CDN را چک کنید)</div>`;
+    }
+  } catch (_) {} finally { pollBusy.qr = false; }
+}
+
+async function pollAudio() {
+  const s = window.__liveSession; if (!s || pollBusy.au) return;
+  pollBusy.au = true;
+  try {
+    const ch = await api(`/professor/sessions/${s.id}/audio-challenge`);
+    const el = document.getElementById("au-token"); if (el) el.textContent = ch.token;
+    if (ch.token !== currentChallenge) {
+      currentChallenge = ch.token;
+      if (playing) playChallenge(ch.token);
+    }
+  } catch (_) {} finally { pollBusy.au = false; }
+}
+
+async function pollMonitor() {
+  const s = window.__liveSession; if (!s || pollBusy.mon) return;
+  pollBusy.mon = true;
+  try {
+    const m = await api(`/professor/sessions/${s.id}/monitor`);
+    const el = document.getElementById("mon"); if (!el) return;
+    const sig = JSON.stringify([m.presentCount, m.pendingCount, m.rows]);
+    if (sig === lastMonSig) return;
+    lastMonSig = sig;
+    el.innerHTML = `
+      <p><span class="chip c-ok">حاضر: ${fa(m.presentCount)}</span> <span class="chip c-warn">در انتظار: ${fa(m.pendingCount)}</span></p>
+      <table><tr><th>دانشجو</th><th>وضعیت</th><th>زمان</th></tr>
+      ${(m.rows || []).map(r => `<tr>
+        <td>${esc(r.studentName)}</td>
+        <td><span class="chip ${r.status === "PRESENT" ? "c-ok" : r.status === "PENDING" ? "c-warn" : "c-bad"}">${
+          r.status === "PRESENT" ? "حاضر" : r.status === "PENDING" ? "در انتظار" : "غایب"}</span></td>
+        <td class="muted">${r.timestamp ? new Date(r.timestamp).toLocaleTimeString("fa-IR") : "—"}</td>
+      </tr>`).join("")}
+      </table>`;
+  } catch (_) {} finally { pollBusy.mon = false; }
+}
+
+function tickCountdown() {
+  const s = window.__liveSession; const el = document.getElementById("live-count");
+  if (!s || !el) return;
+  const left = s.expiresAt - Date.now();
+  if (left <= 0) { el.textContent = "پایان یافته"; return; }
+  const m = Math.floor(left / 60000), sec = Math.floor((left % 60000) / 1000);
+  el.textContent = fa(m) + ":" + fa(String(sec).padStart(2, "0"));
+}
+
+function togglePlay() {
+  if (playing) { stopChallenge(); document.getElementById("au-btn").textContent = "▶ پخش صدا (برای گوشی دانشجوها)"; }
+  else { if (currentChallenge) playChallenge(currentChallenge); document.getElementById("au-btn").textContent = "⏸ توقف پخش"; }
+}
+
+async function closeLive() {
+  const s = window.__liveSession; if (!s) return;
+  if (!confirm("جلسه پایان یابد؟ QR و چالش صوتی نامعتبر می‌شوند.")) return;
+  await api(`/professor/sessions/${s.id}/close`, { method:"POST" });
+  liveStop(); renderApp("dashboard");
+}
+
+function liveStop() {
+  liveTimer.forEach(clearInterval); liveTimer = [];
+  stopChallenge(); currentChallenge = null; window.__liveSession = null;
+  lastMonSig = ""; lastQrToken = ""; pollBusy = { qr: false, mon: false, au: false };
+}
+
+async function viewCourses() {
+  const v = document.getElementById("view");
+  async function load() {
+    try {
+      const courses = await api("/professor/courses");
+      v.innerHTML = `
+      <div class="card" style="margin-bottom:14px">
+        <h3 style="margin-top:0">درس جدید</h3>
+        <div class="row">
+          <div><label>نام درس</label><input id="c-name"></div>
+          <div><label>ساختمان</label><input id="c-b"></div>
+          <div><label>کلاس</label><input id="c-r"></div>
+        </div>
+        <div id="c-msg"></div>
+        <button class="btn-p" onclick="addCourse()">افزودن</button>
+      </div>
+      <div class="card"><table><tr><th>درس</th><th>ساختمان</th><th>کلاس</th></tr>
+        ${courses.map(c => `<tr><td>${esc(c.name)}</td><td>${esc(c.building)}</td><td>${fa(c.room)}</td></tr>`).join("") || "<tr><td colspan='3' class='muted'>درسی ثبت نشده</td></tr>"}
+      </table></div>`;
+    } catch (e) { v.innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+  }
+  await load();
+  window.addCourse = async () => {
+    try {
+      await api("/professor/courses", { method:"POST", body: JSON.stringify({
+        name: document.getElementById("c-name").value,
+        building: document.getElementById("c-b").value,
+        room: document.getElementById("c-r").value,
+      })});
+      await load();
+    } catch (e) { document.getElementById("c-msg").innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+  };
+}
+
+async function viewUsers() {
+  const v = document.getElementById("view");
+  v.innerHTML = `
+  <div class="card" style="max-width:520px">
+    <h3 style="margin-top:0">ایجاد کاربر جدید</h3>
+    <label>نام و نام خانوادگی</label><input id="u-name">
+    <div style="height:10px"></div>
+    <label>ایمیل</label><input id="u-email" type="email">
+    <div style="height:10px"></div>
+    <label>رمز عبور (حداقل ۶ کاراکتر)</label><input id="u-pass" type="password">
+    <div style="height:10px"></div>
+    <label>نقش</label>
+    <span class="chipbtn active" data-r="STUDENT">دانشجو</span><span class="chipbtn" data-r="PROFESSOR">استاد</span>
+    <div style="height:10px"></div>
+    <label>شماره دانشجویی (فقط دانشجو)</label><input id="u-snum">
+    <div id="u-msg"></div>
+    <button class="btn-p" onclick="addUser()">ایجاد حساب</button>
+  </div>`;
+  document.querySelectorAll(".chipbtn").forEach(ch => ch.onclick = () => {
+    document.querySelectorAll(".chipbtn").forEach(x => x.classList.remove("active"));
+    ch.classList.add("active");
+  });
+  window.addUser = async () => {
+    const msg = document.getElementById("u-msg");
+    try {
+      await api("/auth/register", { method:"POST", body: JSON.stringify({
+        name: document.getElementById("u-name").value,
+        email: document.getElementById("u-email").value,
+        password: document.getElementById("u-pass").value,
+        role: document.querySelector(".chipbtn.active").dataset.r,
+        studentNumber: document.getElementById("u-snum").value || null,
+      })});
+      msg.innerHTML = `<div class="okb">حساب ساخته شد ✔</div>`;
+    } catch (e) { msg.innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+  };
+}
+
+async function viewReports() {
+  const v = document.getElementById("view");
+  try {
+    const reports = await api("/professor/reports");
+    v.innerHTML = `<div class="card"><table><tr><th>درس</th><th>تاریخ</th><th>حاضر</th><th>غایب</th><th></th></tr>
+      ${reports.map(r => `<tr>
+        <td>${esc(r.courseName)}</td><td>${esc(r.date)}</td><td>${fa(r.presentCount)}</td><td>${fa(r.absentCount)}</td>
+        <td><button class="btn-g" onclick="showReport('${r.sessionId}')">جزئیات</button></td>
+      </tr>`).join("") || "<tr><td colspan='5' class='muted'>گزارشی نیست</td></tr>"}
+    </table></div><div id="rep-detail"></div>`;
+  } catch (e) { v.innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+  window.showReport = async id => {
+    try {
+      const d = await api(`/professor/reports/${id}`);
+      document.getElementById("rep-detail").innerHTML = `
+      <h3 style="margin:18px 0 10px">جزئیات — ${esc(d.summary.courseName)} (${esc(d.summary.date)})</h3>
+      <div class="card"><table><tr><th>دانشجو</th><th>وضعیت</th><th>زمان</th></tr>
+      ${(d.rows || []).map(r => `<tr>
+        <td>${esc(r.studentName)}</td>
+        <td><span class="chip ${r.status === "PRESENT" ? "c-ok" : r.status === "PENDING" ? "c-warn" : "c-bad"}">${
+          r.status === "PRESENT" ? "حاضر" : r.status === "PENDING" ? "در انتظار" : "غایب"}</span></td>
+        <td class="muted">${r.timestamp ? new Date(r.timestamp).toLocaleTimeString("fa-IR") : "—"}</td>
+      </tr>`).join("")}
+      </table></div>`;
+      document.getElementById("rep-detail").scrollIntoView({ behavior: "smooth" });
+    } catch (e) { document.getElementById("rep-detail").innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+  };
+}
+
+render();
+</script>
+</body>
+</html>

@@ -80,7 +80,7 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideTonePlayer(): TonePlayer = TonePlayer()
+    fun provideTonePlayer(@ApplicationContext context: Context): TonePlayer = TonePlayer(context)
 
     @Provides
     @Singleton

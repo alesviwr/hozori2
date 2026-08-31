@@ -40,6 +40,10 @@ import retrofit2.http.Path
  */
 interface AttendanceApi {
 
+    // ───────── گرم‌کردن اتصال (بدون Auth، بدون نیاز به پارس JSON) ─────────
+    @GET(".")
+    suspend fun ping(): retrofit2.Response<okhttp3.ResponseBody>
+
     // ───────── Auth ─────────
     @POST("auth/login")
     suspend fun login(@Body body: LoginRequestDto): LoginResponseDto
