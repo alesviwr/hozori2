@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -38,6 +39,7 @@ import com.smartattendance.core.util.Fa
 import com.smartattendance.core.util.Formatters
 import com.smartattendance.domain.model.ReportDetail
 import com.smartattendance.domain.model.ReportSummary
+import kotlinx.coroutines.isActive
 import com.smartattendance.domain.usecase.GetReportDetailUseCase
 import com.smartattendance.domain.usecase.GetReportsUseCase
 import com.smartattendance.domain.usecase.ObserveCachedReportsUseCase
@@ -78,7 +80,7 @@ class ReportsViewModel @Inject constructor(
     fun startAutoRefresh() {
         if (autoRefreshJob?.isActive == true) return
         autoRefreshJob = viewModelScope.launch {
-            while (kotlinx.coroutines.isActive) {
+            while (isActive) {
                 kotlinx.coroutines.delay(REFRESH_INTERVAL_MS)
                 runCatching { getReports() }
             }
@@ -227,7 +229,7 @@ class ReportDetailViewModel @Inject constructor(
     fun startAutoRefresh() {
         if (autoRefreshJob?.isActive == true) return
         autoRefreshJob = viewModelScope.launch {
-            while (kotlinx.coroutines.isActive) {
+            while (isActive) {
                 kotlinx.coroutines.delay(REFRESH_INTERVAL_MS)
                 runCatching { getReportDetail(sessionId) }.onSuccess { _detail.value = it }
             }
