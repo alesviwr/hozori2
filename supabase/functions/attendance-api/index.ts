@@ -19,7 +19,10 @@ const authClient: SupabaseClient = createClient(SUPABASE_URL, ANON_KEY);
 // (خصوصاً روی اتصال‌های کندتر/فیلترشده) کافی نبود و باعث می‌شد QR سالم هم تا رسیدن
 // درخواست verify-qr به سرور منقضی شده باشد. ۱۵ ثانیه هنوز چرخشی و امن است ولی زمان کافی می‌دهد.
 const QR_TTL_MS = 15_000;
-const AUDIO_TTL_MS = 12_000;
+// توجه: قبلاً ۱۲ ثانیه بود. بعد از شنیدن توکن، کلاینت باید بررسی Play Integrity را هم انجام
+// بدهد (که خودش تا چند ثانیه طول می‌کشد) و بعد درخواست verify-audio را بفرستد. جمع این زمان‌ها
+// راحت از ۱۲ ثانیه رد می‌شد و توکن سالم را «منقضی» نشان می‌داد. ۳۰ ثانیه بافر کافی می‌دهد.
+const AUDIO_TTL_MS = 30_000;
 const QR_PREFIX = "AT";
 
 class ApiError extends Error {

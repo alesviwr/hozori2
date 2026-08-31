@@ -19,6 +19,7 @@ object Fa {
     const val LOGIN = "ورود"
     const val LOGOUT = "خروج"
     const val RETRY = "تلاش مجدد"
+    const val REFRESH = "رفرش"
     const val BACK = "بازگشت"
     const val EMAIL = "ایمیل / شماره دانشجویی"
     const val PASSWORD = "رمز عبور"

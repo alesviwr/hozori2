@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Assessment
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -59,9 +60,39 @@ class ReportsViewModel @Inject constructor(
     val cachedReports = observeCached()
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
+    private val _refreshing = MutableStateFlow(false)
+    val refreshing: StateFlow<Boolean> = _refreshing.asStateFlow()
+
+    private var autoRefreshJob: kotlinx.coroutines.Job? = null
+
     init { refresh() }
 
-    fun refresh() = viewModelScope.launch { runCatching { getReports() } }
+    /** رفرش دستی (دکمه) */
+    fun refresh() = viewModelScope.launch {
+        _refreshing.value = true
+        runCatching { getReports() }
+        _refreshing.value = false
+    }
+
+    /** رفرش خودکار دوره‌ای — فقط تا وقتی صفحه روی این ViewModel باز است زنده می‌ماند */
+    fun startAutoRefresh() {
+        if (autoRefreshJob?.isActive == true) return
+        autoRefreshJob = viewModelScope.launch {
+            while (kotlinx.coroutines.isActive) {
+                kotlinx.coroutines.delay(REFRESH_INTERVAL_MS)
+                runCatching { getReports() }
+            }
+        }
+    }
+
+    fun stopAutoRefresh() {
+        autoRefreshJob?.cancel()
+        autoRefreshJob = null
+    }
+
+    private companion object {
+        const val REFRESH_INTERVAL_MS = 5_000L
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -72,6 +103,27 @@ fun ReportsScreen(
     vm: ReportsViewModel = hiltViewModel(),
 ) {
     val reports by vm.cachedReports.collectAsStateWithLifecycle()
+    val refreshing by vm.refreshing.collectAsStateWithLifecycle()
+
+    // رفرش خودکار وقتی صفحه در حال نمایش است، و توقف وقتی خارج می‌شود (بدون نیاز به بستن اپ)
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_RESUME -> {
+                    vm.refresh()
+                    vm.startAutoRefresh()
+                }
+                androidx.lifecycle.Lifecycle.Event.ON_PAUSE -> vm.stopAutoRefresh()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            vm.stopAutoRefresh()
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -80,6 +132,18 @@ fun ReportsScreen(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = Fa.BACK)
+                    }
+                },
+                actions = {
+                    IconButton(onClick = vm::refresh, enabled = !refreshing) {
+                        if (refreshing) {
+                            androidx.compose.material3.CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp,
+                            )
+                        } else {
+                            Icon(Icons.Filled.Refresh, contentDescription = Fa.REFRESH)
+                        }
                     }
                 },
             )
@@ -147,10 +211,36 @@ class ReportDetailViewModel @Inject constructor(
     private val _detail = MutableStateFlow<ReportDetail?>(null)
     val detail: StateFlow<ReportDetail?> = _detail.asStateFlow()
 
-    init {
-        viewModelScope.launch {
-            runCatching { getReportDetail(sessionId) }.onSuccess { _detail.value = it }
+    private val _refreshing = MutableStateFlow(false)
+    val refreshing: StateFlow<Boolean> = _refreshing.asStateFlow()
+
+    private var autoRefreshJob: kotlinx.coroutines.Job? = null
+
+    init { refresh() }
+
+    fun refresh() = viewModelScope.launch {
+        _refreshing.value = true
+        runCatching { getReportDetail(sessionId) }.onSuccess { _detail.value = it }
+        _refreshing.value = false
+    }
+
+    fun startAutoRefresh() {
+        if (autoRefreshJob?.isActive == true) return
+        autoRefreshJob = viewModelScope.launch {
+            while (kotlinx.coroutines.isActive) {
+                kotlinx.coroutines.delay(REFRESH_INTERVAL_MS)
+                runCatching { getReportDetail(sessionId) }.onSuccess { _detail.value = it }
+            }
         }
+    }
+
+    fun stopAutoRefresh() {
+        autoRefreshJob?.cancel()
+        autoRefreshJob = null
+    }
+
+    private companion object {
+        const val REFRESH_INTERVAL_MS = 5_000L
     }
 }
 
@@ -161,6 +251,26 @@ fun ReportDetailScreen(
     vm: ReportDetailViewModel = hiltViewModel(),
 ) {
     val detail by vm.detail.collectAsStateWithLifecycle()
+    val refreshing by vm.refreshing.collectAsStateWithLifecycle()
+
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_RESUME -> {
+                    vm.refresh()
+                    vm.startAutoRefresh()
+                }
+                androidx.lifecycle.Lifecycle.Event.ON_PAUSE -> vm.stopAutoRefresh()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            vm.stopAutoRefresh()
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -169,6 +279,18 @@ fun ReportDetailScreen(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = Fa.BACK)
+                    }
+                },
+                actions = {
+                    IconButton(onClick = vm::refresh, enabled = !refreshing) {
+                        if (refreshing) {
+                            androidx.compose.material3.CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp,
+                            )
+                        } else {
+                            Icon(Icons.Filled.Refresh, contentDescription = Fa.REFRESH)
+                        }
                     }
                 },
             )
@@ -213,13 +335,13 @@ fun ReportDetailScreen(
                     ) {
                         Column {
                             Text(row.studentName, style = MaterialTheme.typography.titleSmall)
-                            row.timestamp?.let {
-                                Text(
-                                    "${Fa.ATTENDANCE_TIME}: ${Formatters.clock(it)}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
+                            // برای دانشجوی غایب هم یک برچسب صریح نشان بده، نه فقط سکوت (خالی‌بودن ستون زمان)
+                            Text(
+                                row.timestamp?.let { "${Fa.ATTENDANCE_TIME}: ${Formatters.clock(it)}" }
+                                    ?: statusFallbackLabel(row.status),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
                         StatusChip(row.status.name)
                     }
@@ -227,4 +349,11 @@ fun ReportDetailScreen(
             }
         }
     }
+}
+
+private fun statusFallbackLabel(status: com.smartattendance.domain.model.AttendanceStatus): String = when (status) {
+    com.smartattendance.domain.model.AttendanceStatus.ABSENT -> "حضور ثبت نشده"
+    com.smartattendance.domain.model.AttendanceStatus.PENDING -> "هنوز جلسه ادامه دارد"
+    com.smartattendance.domain.model.AttendanceStatus.FAILED -> "تأیید ناموفق بود"
+    com.smartattendance.domain.model.AttendanceStatus.PRESENT -> ""
 }
