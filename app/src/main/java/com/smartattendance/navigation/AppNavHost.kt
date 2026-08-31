@@ -81,6 +81,40 @@ fun AppNavHost(navController: NavHostController = rememberNavController()) {
         }
     }
 
+    // ───────── ریست امنیتیِ جریان حضور و غیاب ─────────
+    // اگر کاربر در حین مراحل بیومتریک یا شنیدن Challenge (یعنی بعد از اسکن QR) برنامه را
+    // پس‌زمینه ببرد — دکمه Home، سوییچ بین برنامه‌ها، خاموش‌شدن صفحه، رفتن به حالت
+    // چندپنجره‌ای/شناور و غیره — با بازگشت باید از نو از اسکن QR شروع کند. این از دست‌به‌دست
+    // شدن گوشی وسط فرآیند یا استفاده از چندوظیفه‌ای برای دور زدن مراحل جلوگیری می‌کند.
+    // از ProcessLifecycleOwner استفاده می‌شود چون رویدادش برای «کل برنامه» است، نه برای
+    // دیالوگ‌های موقتی مثل BiometricPrompt که فقط باعث ON_PAUSE کوتاه می‌شوند نه ON_STOP.
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        var leftDuringSensitiveFlow = false
+        val processObserver = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_STOP -> {
+                    val route = navController.currentDestination?.route.orEmpty()
+                    if (route.startsWith("student_biometric") || route.startsWith("student_audio")) {
+                        leftDuringSensitiveFlow = true
+                    }
+                }
+                androidx.lifecycle.Lifecycle.Event.ON_START -> {
+                    if (leftDuringSensitiveFlow) {
+                        leftDuringSensitiveFlow = false
+                        navController.navigate(Routes.SCANNER) {
+                            popUpTo(Routes.STUDENT_HOME)
+                        }
+                    }
+                }
+                else -> Unit
+            }
+        }
+        androidx.lifecycle.ProcessLifecycleOwner.get().lifecycle.addObserver(processObserver)
+        onDispose {
+            androidx.lifecycle.ProcessLifecycleOwner.get().lifecycle.removeObserver(processObserver)
+        }
+    }
+
     NavHost(
         navController = navController,
         startDestination = Routes.SPLASH,
@@ -207,6 +241,9 @@ fun AppNavHost(navController: NavHostController = rememberNavController()) {
                 biometricOk = entry.arguments?.getBoolean("bioOk") ?: false,
                 onVerified = { sessionId -> navController.navigate(Routes.result(sessionId)) { popUpTo(Routes.STUDENT_HOME) } },
                 onBack = { navController.popBackStack() },
+                onSecurityReset = {
+                    navController.navigate(Routes.SCANNER) { popUpTo(Routes.STUDENT_HOME) }
+                },
             )
         }
 

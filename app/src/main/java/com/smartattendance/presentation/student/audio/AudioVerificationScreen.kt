@@ -61,8 +61,10 @@ import com.smartattendance.domain.usecase.SubmitAudioTokenUseCase
 import com.smartattendance.security.integrity.IntegrityChecker
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -130,6 +132,13 @@ class AudioVerificationViewModel @Inject constructor(
             val tokenDeferred = CompletableDeferred<String>()
             val deadline = System.currentTimeMillis() + TIMEOUT_MS
 
+            // بهینه‌سازی تاخیر: چک Play Integrity را همزمان با شروع شنیدن اجرا کن، نه بعد از
+            // پیدا شدن توکن. چون شنیدن/دیکود خودش چند ثانیه طول می‌کشد، وقتی توکن پیدا شد
+            // این چک معمولاً از قبل تمام شده و submit() دیگر منتظرش نمی‌ماند.
+            val verdictDeferred = async(Dispatchers.IO) {
+                integrityChecker.verdict(nonce = "attendance:$sessionId")
+            }
+
             val listen = launch {
                 runCatching {
                     micRecorder.frames()
@@ -172,18 +181,21 @@ class AudioVerificationViewModel @Inject constructor(
 
                 token != null -> {
                     _phase.value = AudioPhase.Verifying
-                    submit(token)
+                    submit(token, verdictDeferred)
                 }
 
                 _phase.value is AudioPhase.Listening ->
                     _phase.value = AudioPhase.Error(AppErrorType.AUDIO_TIMEOUT)
             }
+
+            // اگر توکن با شکست/timeout تمام شد، دیگر نیازی به نتیجه‌ی integrity نیست
+            if (token == null) verdictDeferred.cancel()
         }
     }
 
     /** ارسال توکن استخراج‌شده + اظهار بیومتریک + نتیجه Integrity به سرور */
-    private suspend fun submit(audioToken: String) {
-        val verdict = integrityChecker.verdict(nonce = "attendance:$sessionId")
+    private suspend fun submit(audioToken: String, verdictDeferred: Deferred<IntegrityVerdict>) {
+        val verdict = verdictDeferred.await()
         runCatching {
             submitAudioToken(
                 sessionId = sessionId,
@@ -258,6 +270,7 @@ fun AudioVerificationScreen(
     biometricOk: Boolean,
     onVerified: (sessionId: String) -> Unit,
     onBack: () -> Unit,
+    onSecurityReset: () -> Unit = onBack,
     vm: AudioVerificationViewModel = hiltViewModel(),
 ) {
     val phase by vm.phase.collectAsStateWithLifecycle()
@@ -290,6 +303,15 @@ fun AudioVerificationScreen(
         }
     }
 
+    // اگر ترک صفحه/بک‌گراند/از دست دادن فوکوس شناسایی شد، به‌جای «تلاش مجدد» محلی،
+    // کاربر مستقیم به مرحله‌ی اسکن QR برگردانده می‌شود — دقیقاً همان چیزی که باید اتفاق بیفتد.
+    LaunchedEffect(phase) {
+        val p = phase
+        if (p is AudioPhase.Error && p.type == AppErrorType.BACKGROUND_DETECTED) {
+            onSecurityReset()
+        }
+    }
+
     // ───────── سخت‌گیری Lifecycle: هر ترک صفحه/بک‌گراند = ابطال ─────────
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -306,7 +328,7 @@ fun AudioVerificationScreen(
         }
     }
 
-    // ───────── سخت‌گیری Focus: Split-Screen و Multi-Window ─────────
+    // ───────── سخت‌گیری Focus: Split-Screen، Multi-Window و پایین‌کشیدن نوتیفیکیشن ─────────
     DisposableEffect(view) {
         val focusListener = android.view.ViewTreeObserver.OnWindowFocusChangeListener { hasFocus ->
             if (!hasFocus) vm.onFocusLost()
